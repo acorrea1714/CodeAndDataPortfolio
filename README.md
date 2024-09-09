@@ -1,5 +1,7 @@
 # CodeAndDataPortfolio
 
+This repository serves as a portfolio showcasing my work in data analysis. It includes a collection of scripts, modules, and projects that demonstrate my expertise in data-driven insights, statistical analysis, and automation. Each project is designed to highlight problem-solving techniques, and innovative solutions in real-world data scenarios.
+
 This documentation helps in maintaining and understanding the usage of each function within the `functions_provider_utils.py` module.
 Usage details are from the: `script_provider_supervisor_table_update.py`, `script_provider_oh_tins_export_sharepoint.py`, `script_provider_ciw_inquiry_update.py`, and `script_FHAS_NextGen.py`
 
