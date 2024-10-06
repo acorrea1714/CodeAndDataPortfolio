@@ -1,0 +1,162 @@
+
+# ----------------------------------------------------------------------------------------
+# Script Name: script_fhas_nextgen.py
+# Author: Andrew Correa
+# ----------------------------------------------------------------------------------------
+# Script Overview:
+# This script performs the following steps:
+# 1. Loads configuration settings from an external .ini file.
+# 2. Authenticates to a SharePoint site using credentials from the configuration file.
+# 3. Fetches the latest file from a SharePoint folder.
+# 4. Retrieves specific sheets from the Excel file (Open Disputes and Closed Disputes).
+# 5. Extracts unique DISPUTE_IDs from the Open Disputes and Closed Disputes sheets.
+# 6. Prepares an SQL query and dynamically inserts the dispute IDs.
+# 7. Executes the query for both open and closed disputes.
+# 8. Saves the query results into CSV files in the user's Downloads folder.
+# ----------------------------------------------------------------------------------------
+
+import os
+import pandas as pd
+import logging
+from io import BytesIO
+from datetime import datetime
+from sqlalchemy import create_engine
+from office365.sharepoint.client_context import ClientContext
+from office365.runtime.auth.authentication_context import AuthenticationContext
+from functions_provider_utils import (load_config, fetch_data_from_sharepoint, 
+                                      get_latest_file_from_sharepoint)
+
+# ----------------------------------------------------------------------------------------
+# Configure logging:
+# Set up logging configuration to track the flow of execution and errors. 
+# All logs will include timestamp, log level, and the message.
+# ----------------------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Set Downloads folder path for saving query results
+DOWNLOADS_FOLDER = os.path.join(os.path.expanduser('~'), 'Downloads')
+
+# ----------------------------------------------------------------------------------------
+# Function: main
+# Description: This is the main function that orchestrates the entire process.
+# It loads configuration, authenticates SharePoint, fetches Excel data, prepares SQL queries,
+# executes them, and saves the results to CSV files.
+# Dependencies: os, pandas, logging, sqlalchemy, office365
+# ----------------------------------------------------------------------------------------
+def main():
+    # ----------------------------------------------------------------------------------------
+    # Step 1: Load configuration from .ini file
+    # The script loads database and SharePoint configurations from the 'config_provider_module.ini' file.
+    # This includes database connection info, SharePoint credentials, and folder paths.
+    # ----------------------------------------------------------------------------------------
+    config_path = 'config_provider_module.ini'
+    config = load_config(config_path)
+
+    # ----------------------------------------------------------------------------------------
+    # Step 2: SharePoint credentials and folder setup
+    # The script retrieves SharePoint credentials and folder URLs from the config file.
+    # It will authenticate with SharePoint using username and password.
+    # ----------------------------------------------------------------------------------------
+    site_url = config['SharePointConfig']['ProviderAnalyticsFileExchange']
+    username = config['SharePointConfig']['username']
+    password = config['SharePointConfig']['password']
+    folder_url = config['SharePointConfig']['FHAS_path']
+
+    # Authenticate with SharePoint
+    ctx_auth = AuthenticationContext(site_url)
+    if ctx_auth.acquire_token_for_user(username, password):
+        ctx = ClientContext(site_url, ctx_auth)
+    else:
+        error_msg = ctx_auth.get_last_error()
+        logger.error(f"Failed to authenticate: {error_msg}")
+        raise Exception(error_msg)
+
+    # ----------------------------------------------------------------------------------------
+    # Step 3: Get the latest file from the SharePoint folder
+    # Fetch the latest file URL from the SharePoint folder specified in the config.
+    # ----------------------------------------------------------------------------------------
+    latest_file_url = get_latest_file_from_sharepoint(ctx, folder_url)
+
+    # ----------------------------------------------------------------------------------------
+    # Step 4: Fetch the latest Excel file from SharePoint
+    # Fetch both 'Open Disputes' and 'Closed Disputes' sheets from the Excel file.
+    # The fetched data is stored as pandas DataFrames.
+    # ----------------------------------------------------------------------------------------
+    open_disputes, _ = fetch_data_from_sharepoint(site_url, latest_file_url, username, password, 'xlsx', 'Open Disputes')
+    closed_disputes, _ = fetch_data_from_sharepoint(site_url, latest_file_url, username, password, 'xlsx', 'Closed Disputes')
+
+    # ----------------------------------------------------------------------------------------
+    # Step 5: Prepare the list of DISPUTE_IDs from the sheets
+    # Extract unique dispute IDs (Appellants) from the 'Open Disputes' and 'Closed Disputes' DataFrames.
+    # ----------------------------------------------------------------------------------------
+    open_dispute_ids = open_disputes['Appellant'].unique().tolist()
+    closed_dispute_ids = closed_disputes['Appellant'].unique().tolist()
+
+    # ----------------------------------------------------------------------------------------
+    # Step 6: Define the SQL query template
+    # This is the core query template to be executed. It pulls arbitration and negotiation
+    # related data based on the dispute IDs provided.
+    # The dispute IDs are dynamically injected into the query in the next steps.
+    # ----------------------------------------------------------------------------------------
+    sql_query =
+  
+
+    # ----------------------------------------------------------------------------------------
+    # Step 7: Dynamically replace the placeholder with actual IDs
+    # The script dynamically replaces the ':DISPUTE_ID_LIST' placeholder in the query
+    # with the list of dispute IDs (one for open disputes, one for closed disputes).
+    # If no dispute IDs are found, 'NULL' is inserted.
+    # ----------------------------------------------------------------------------------------
+    if open_dispute_ids:
+        open_query = sql_query.replace(':DISPUTE_ID_LIST', ','.join(f"'{dispute_id}'" for dispute_id in open_dispute_ids))
+    else:
+        logger.warning("No DISPUTE_IDs found for Open Disputes.")
+        open_query = sql_query.replace(':DISPUTE_ID_LIST', "NULL")
+
+    if closed_dispute_ids:
+        closed_query = sql_query.replace(':DISPUTE_ID_LIST', ','.join(f"'{dispute_id}'" for dispute_id in closed_dispute_ids))
+    else:
+        logger.warning("No DISPUTE_IDs found for Closed Disputes.")
+        closed_query = sql_query.replace(':DISPUTE_ID_LIST', "NULL")
+
+    # ----------------------------------------------------------------------------------------
+    # Step 8: Define the connection URL for SQLAlchemy
+    # The script constructs the connection string using credentials and server details from the config.
+    # ----------------------------------------------------------------------------------------
+    
+    db_config = config['NextGenConfig']
+    server = db_config['server']
+    database = db_config['database']
+    username = db_config['username']
+    password = db_config['password']
+    connection_url = f"mssql+pyodbc://{username}:{password}@{server}/{database}?driver=SQL+Server"
+
+    # Create the SQLAlchemy engine for executing the queries
+    engine = create_engine(connection_url)
+
+    # ----------------------------------------------------------------------------------------
+    # Step 9: Execute the queries and save the results to the Downloads folder
+    # The script executes both the open and closed disputes queries and saves the results
+    # to CSV files in the user's Downloads folder.
+    # ----------------------------------------------------------------------------------------
+    try:
+        with engine.connect() as connection:
+            # Execute open disputes query
+            open_results = pd.read_sql(open_query, connection)
+            open_disputes_csv_path = os.path.join(DOWNLOADS_FOLDER, 'Open_Disputes_Results.csv')
+            open_results.to_csv(open_disputes_csv_path, index=False)
+            logger.info(f"Open Disputes results saved to {open_disputes_csv_path}")
+
+            # Execute closed disputes query
+            closed_results = pd.read_sql(closed_query, connection)
+            closed_disputes_csv_path = os.path.join(DOWNLOADS_FOLDER, 'Closed_Disputes_Results.csv')
+            closed_results.to_csv(closed_disputes_csv_path, index=False)
+            logger.info(f"Closed Disputes results saved to {closed_disputes_csv_path}")
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
+
